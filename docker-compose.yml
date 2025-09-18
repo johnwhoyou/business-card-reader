@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  business-card-reader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      # Add your environment variables here
+      # - NEXT_PUBLIC_AIRTABLE_API_KEY=your_api_key
+      # - NEXT_PUBLIC_AIRTABLE_BASE_ID=your_base_id
+      # - NEXT_PUBLIC_AIRTABLE_TABLE_NAME=CRM
+      # - OPENAI_API_KEY=your_openai_api_key
+    # Uncomment the following lines if you want to use an env file
+    # env_file:
+    #   - .env.local
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
