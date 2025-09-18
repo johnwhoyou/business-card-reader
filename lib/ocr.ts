@@ -24,10 +24,21 @@ export async function extractTextFromImage(imageDataUrl: string): Promise<string
 
     const data = await response.json()
     console.log('✅ OCR extraction successful!')
-    console.log('📝 Extracted text length:', data.text?.length || 0)
-    console.log('📝 Extracted text preview:', data.text?.substring(0, 100) + '...')
     
-    return data.text
+    // Handle new structured response
+    if (data.data) {
+      console.log('📊 Structured data received:', data.data)
+      return data.data
+    }
+    
+    // Handle fallback raw text response
+    if (data.text) {
+      console.log('📝 Fallback text received, length:', data.text?.length || 0)
+      console.log('📝 Extracted text preview:', data.text?.substring(0, 100) + '...')
+      return data.text
+    }
+    
+    throw new Error('No data received from OCR service')
   } catch (error) {
     console.error('❌ OCR Error Details:')
     console.error('- Error type:', error?.constructor?.name)
@@ -62,7 +73,18 @@ export async function extractTextFromImageWithProgress(
 
     const data = await response.json()
     onProgress(100)
-    return data.text
+    
+    // Handle new structured response
+    if (data.data) {
+      return data.data
+    }
+    
+    // Handle fallback raw text response
+    if (data.text) {
+      return data.text
+    }
+    
+    throw new Error('No data received from OCR service')
   } catch (error) {
     console.error('OCR Error:', error)
     throw new Error('Failed to extract text from image')

@@ -510,12 +510,22 @@ export default function Home() {
     try {
       setProcessingProgress(20)
       
-      // Extract text using OCR
-      const text = await extractTextFromImage(imageDataUrl)
+      // Extract data using OCR
+      const extractedData = await extractTextFromImage(imageDataUrl)
       setProcessingProgress(60)
       
-      // Parse business card data
-      const parsedData = parseBusinessCardData(text)
+      // Check if we got structured data or raw text
+      let parsedData: BusinessCardData
+      if (typeof extractedData === 'object' && extractedData !== null) {
+        // We got structured data directly from AI
+        console.log('✅ Using structured data from AI')
+        parsedData = extractedData as BusinessCardData
+      } else {
+        // We got raw text, use the old parser as fallback
+        console.log('📝 Using fallback text parser')
+        parsedData = parseBusinessCardData(extractedData as string)
+      }
+      
       setBusinessCardData(parsedData)
       setProcessingProgress(100)
       

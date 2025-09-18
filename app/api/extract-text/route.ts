@@ -59,7 +59,26 @@ export async function POST(request: NextRequest) {
           content: [
             {
               type: "text",
-              text: `Extract all text from this business card image. Return ONLY the raw text content, do not format or structure it. Include everything you can read clearly.`
+              text: `Extract business card information and return as JSON with these exact fields:
+{
+  "name": "Full name",
+  "title": "Job title/position", 
+  "company": "Company name",
+  "phone": "Phone number(s)",
+  "email": "Email address(es)",
+  "website": "Website URL(s)",
+  "address": "Full address",
+  "industry": "Industry/sector",
+  "notes": "Any additional text, taglines, or specializations"
+}
+
+Rules:
+- If a field is not found, use null
+- Include ALL phone numbers and emails if multiple exist (separate with commas)
+- For industry, choose from: Banking & Finance, Investment & Private Equity, Technology & Software, Real Estate & Property Development, Hospitality & Leisure, Food & Beverage, Professional Services, Logistics & Transportation, Retail & Consumer Goods, Telecommunications, Manufacturing & Industrial, Education & Training, Energy & Utilities, Government & Nonprofit, Media & Advertising, Healthcare & Pharmaceutical, Agriculture, Personal Services
+- For notes, include any remaining relevant text, taglines, or specializations
+- Be as accurate as possible with the original text
+- Return ONLY valid JSON, no markdown formatting, no code blocks, no other text`
             },
             {
               type: "image_url",
@@ -77,12 +96,40 @@ export async function POST(request: NextRequest) {
     console.log('✅ OpenAI API response received')
     console.log('📄 Response choices:', response.choices?.length || 0)
     
-    const extractedText = response.choices[0]?.message?.content || ''
-    console.log('📝 Extracted text length:', extractedText.length)
-    console.log('📝 Extracted text preview:', extractedText.substring(0, 100) + '...')
+    const extractedContent = response.choices[0]?.message?.content || ''
+    console.log('📝 Extracted content length:', extractedContent.length)
+    console.log('📝 Extracted content preview:', extractedContent.substring(0, 200) + '...')
+    
+    // Clean and parse the JSON response
+    let parsedData
+    try {
+      // Remove markdown code blocks if present
+      let cleanedContent = extractedContent.trim()
+      if (cleanedContent.startsWith('```json')) {
+        cleanedContent = cleanedContent.replace(/^```json\s*/, '').replace(/\s*```$/, '')
+      } else if (cleanedContent.startsWith('```')) {
+        cleanedContent = cleanedContent.replace(/^```\s*/, '').replace(/\s*```$/, '')
+      }
+      
+      console.log('🧹 Cleaned content for parsing:', cleanedContent.substring(0, 200) + '...')
+      
+      parsedData = JSON.parse(cleanedContent.trim())
+      console.log('✅ Successfully parsed JSON response')
+      console.log('📊 Parsed data:', parsedData)
+    } catch (parseError) {
+      console.error('❌ Failed to parse JSON response:', parseError)
+      console.log('📝 Raw response:', extractedContent)
+      
+      // Fallback: return the raw text for backward compatibility
+      return NextResponse.json({ 
+        text: extractedContent.trim(),
+        success: true,
+        fallback: true
+      })
+    }
     
     return NextResponse.json({ 
-      text: extractedText.trim(),
+      data: parsedData,
       success: true 
     })
 
