@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { Camera, Upload, Save, RotateCcw, Loader2 } from 'lucide-react'
+import { Camera, Upload, Save, RotateCcw, Loader2, CheckCircle, Plus } from 'lucide-react'
 import { extractTextFromImage } from '@/lib/ocr'
 import { parseBusinessCardData } from '@/lib/text-parser'
 import { saveToAirtable } from '@/lib/airtable'
@@ -48,6 +48,7 @@ export default function Home() {
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string>('')
   const [success, setSuccess] = useState<string>('')
+  const [showSuccessActions, setShowSuccessActions] = useState(false)
   const [processingProgress, setProcessingProgress] = useState(0)
   
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -556,12 +557,17 @@ export default function Home() {
     
     setIsSaving(true)
     setError('')
+    setSuccess('')
+    setShowSuccessActions(false)
     
     try {
       await saveToAirtable(businessCardData)
-      setSuccess('Business card data saved to Airtable successfully!')
+      setSuccess('✅ Successfully saved to Airtable!')
+      setShowSuccessActions(true)
+      
     } catch (err) {
-      setError('Failed to save to Airtable. Please check your configuration.')
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error'
+      setError(`Failed to save to Airtable: ${errorMessage}. Please check your configuration and try again.`)
       console.error('Airtable Error:', err)
     } finally {
       setIsSaving(false)
@@ -573,11 +579,19 @@ export default function Home() {
     setBusinessCardData({})
     setError('')
     setSuccess('')
+    setShowSuccessActions(false)
     setProcessingProgress(0)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
   }
+
+  const processNewCard = () => {
+    resetAll()
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+
 
   const updateField = (field: keyof BusinessCardData, value: string) => {
     setBusinessCardData(prev => ({
@@ -610,15 +624,6 @@ export default function Home() {
           </Card>
         )}
         
-        {success && (
-          <Card className="mb-6 border-green-200 bg-green-50">
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-2 text-green-700">
-                <span className="text-sm">{success}</span>
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Main Card */}
         <Card>
@@ -913,22 +918,39 @@ export default function Home() {
                 <div className="pt-4">
                   <Button
                     onClick={saveToAirtableHandler}
-                    disabled={isSaving || !businessCardData.name}
-                    className="w-full bg-black hover:bg-gray-800 text-white"
+                    disabled={isSaving || !businessCardData.name || showSuccessActions}
+                    className={cn(
+                      "w-full text-white transition-all duration-200",
+                      showSuccessActions 
+                        ? "bg-green-600 hover:bg-green-700" 
+                        : "bg-black hover:bg-gray-800"
+                    )}
                     size="lg"
                   >
                     {isSaving ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Saving...
+                      </>
+                    ) : showSuccessActions ? (
+                      <>
+                        Saved
                       </>
                     ) : (
                       <>
-                        <Save className="mr-2 h-4 w-4" />
                         Save to Airtable
                       </>
                     )}
                   </Button>
+                  
+                  {showSuccessActions && (
+                    <Button
+                      onClick={processNewCard}
+                      className="w-full bg-black hover:bg-gray-800 text-white mt-3"
+                      size="lg"
+                    >
+                      Process New Card
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
