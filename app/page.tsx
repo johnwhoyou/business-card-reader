@@ -54,6 +54,7 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [isCameraOpen, setIsCameraOpen] = useState(false)
+  const [isCameraLoading, setIsCameraLoading] = useState(false)
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -73,17 +74,27 @@ export default function Home() {
   }
 
   const startCamera = async () => {
+    setIsCameraLoading(true)
+    setError('')
     try {
       // Debug information
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
       const isAndroid = /Android/.test(navigator.userAgent)
       const isMobile = isIOS || isAndroid
+      const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent)
+      const safariVersion = isIOS && isSafari ? navigator.userAgent.match(/Version\/(\d+)/)?.[1] : null
+      const iosVersion = isIOS ? navigator.userAgent.match(/OS (\d+)_/)?.[1] : null
+      const isModernIOS = iosVersion ? parseInt(iosVersion) >= 11 : false
       
       console.log('Browser info:', {
         userAgent: navigator.userAgent,
         isIOS,
         isAndroid,
         isMobile,
+        isSafari,
+        safariVersion,
+        iosVersion,
+        isModernIOS,
         isSecureContext: window.isSecureContext,
         hostname: window.location.hostname,
         protocol: window.location.protocol,
@@ -95,58 +106,180 @@ export default function Home() {
       // Check if we're on HTTPS or localhost
       const isLocalhost = window.location.hostname === 'localhost' || 
                          window.location.hostname === '127.0.0.1' ||
-                         window.location.hostname.startsWith('192.168.') ||
-                         window.location.hostname.startsWith('10.') ||
-                         window.location.hostname.endsWith('.local')
+                         window.location.hostname === '::1'
       
-      const isSecureContext = window.isSecureContext || isLocalhost
+      const isHTTPS = window.location.protocol === 'https:'
+      const isSecureContext = window.isSecureContext || isLocalhost || isHTTPS
       
       if (!isSecureContext) {
-        setError('Camera requires HTTPS. Please use a secure connection or localhost.')
+        if (isIOS) {
+          setError('Camera requires HTTPS on iOS. Please make sure you\'re accessing the site via HTTPS.')
+        } else {
+          setError('Camera requires HTTPS. Please use a secure connection or localhost.')
+        }
+        setIsCameraLoading(false)
         return
       }
+
+      // Ensure the <video> element is mounted before we attach the stream
+      setIsCameraOpen(true)
+      // Wait a tick for React to render the video element so ref is available
+      await new Promise(resolve => setTimeout(resolve, 0))
 
       // Check if getUserMedia is supported
-      if (!navigator.mediaDevices) {
-        // Try legacy getUserMedia as fallback
-        const legacyGetUserMedia = navigator.getUserMedia || 
-                                 (navigator as any).webkitGetUserMedia || 
-                                 (navigator as any).mozGetUserMedia || 
-                                 (navigator as any).msGetUserMedia
-        
-        if (!legacyGetUserMedia) {
-          setError('Camera not supported on this device. Please try Safari or Chrome on iOS.')
-          return
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        // For iOS Safari, we need to check for the modern API first
+        if (isIOS && window.isSecureContext) {
+          // Modern iOS Safari should have mediaDevices
+          if (!navigator.mediaDevices) {
+            if (isSafari) {
+              setError(`Camera API not available. Please update Safari to version 11 or later. Current version: ${safariVersion || 'unknown'}`)
+            } else {
+              if (isModernIOS) {
+                setError('Please use Safari browser on iOS for camera access. Chrome and other browsers don\'t support camera on iOS. Your iPhone supports camera access - just switch to Safari.')
+              } else {
+                setError('Please use Safari browser on iOS for camera access. Chrome and other browsers don\'t support camera on iOS.')
+              }
+            }
+            setIsCameraLoading(false)
+            setIsCameraOpen(false)
+            return
+          }
+          
+          if (!navigator.mediaDevices.getUserMedia) {
+            if (isSafari) {
+              setError(`Camera access not supported in Safari version ${safariVersion || 'unknown'}. Please update to Safari 11 or later.`)
+            } else {
+              setError('Please use Safari browser on iOS for camera access. Chrome and other browsers don\'t support camera on iOS.')
+            }
+            setIsCameraLoading(false)
+            setIsCameraOpen(false)
+            return
+          }
+        } else {
+          // Try legacy getUserMedia as fallback for older browsers
+          const legacyGetUserMedia = navigator.getUserMedia || 
+                                   (navigator as any).webkitGetUserMedia || 
+                                   (navigator as any).mozGetUserMedia || 
+                                   (navigator as any).msGetUserMedia
+          
+          if (!legacyGetUserMedia) {
+            if (isIOS) {
+              setError('Camera not supported. Please use Safari on iOS (not Chrome or other browsers).')
+            } else {
+              setError('Camera not supported on this device. Please try a modern browser.')
+            }
+            setIsCameraLoading(false)
+            setIsCameraOpen(false)
+            return
+          }
         }
         
-        // Use legacy getUserMedia
-        console.log('Using legacy getUserMedia')
-        legacyGetUserMedia.call(navigator, 
-          { video: true }, 
-          (stream: MediaStream) => {
-            if (videoRef.current) {
-              videoRef.current.srcObject = stream
-              setIsCameraOpen(true)
-              setError('')
-            }
-          },
-          (error: any) => {
-            console.error('Legacy camera error:', error)
-            setError('Camera access failed. Please try Safari or Chrome on iOS.')
+        // If we reach here and need legacy getUserMedia, use it
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          const legacyGetUserMedia = navigator.getUserMedia || 
+                                   (navigator as any).webkitGetUserMedia || 
+                                   (navigator as any).mozGetUserMedia || 
+                                   (navigator as any).msGetUserMedia
+          
+          if (legacyGetUserMedia) {
+            console.log('Using legacy getUserMedia')
+            legacyGetUserMedia.call(navigator, 
+              { video: true }, 
+              async (stream: MediaStream) => {
+                if (videoRef.current) {
+                  const video = videoRef.current
+                  console.log('Legacy: Setting stream on video element:', {
+                    videoElement: video,
+                    stream: stream,
+                    streamActive: stream.active,
+                    streamTracks: stream.getTracks().map(track => ({
+                      kind: track.kind,
+                      enabled: track.enabled,
+                      readyState: track.readyState,
+                      muted: track.muted
+                    }))
+                  })
+                  
+                  // Try multiple methods to set the video source
+                  try {
+                    video.srcObject = stream
+                  } catch (e) {
+                    console.warn('Legacy: srcObject not supported, trying createObjectURL fallback')
+                    // Fallback for older browsers
+                    if ('mozSrcObject' in video) {
+                      (video as any).mozSrcObject = stream
+                    } else {
+                      video.src = URL.createObjectURL(stream as any)
+                    }
+                  }
+                  
+                  try {
+                    console.log('Legacy: Attempting to play video...')
+                    await video.play()
+                    
+                    console.log('Legacy: Video play successful:', {
+                      paused: video.paused,
+                      currentTime: video.currentTime,
+                      videoWidth: video.videoWidth,
+                      videoHeight: video.videoHeight,
+                      readyState: video.readyState
+                    })
+                    
+                    setIsCameraOpen(true)
+                    setError('')
+                    setIsCameraLoading(false)
+                    console.log('Legacy camera stream started successfully')
+                  } catch (playError) {
+                    console.error('Legacy video play error:', playError)
+                    setError('Unable to start camera preview. Please try again.')
+                    stream.getTracks().forEach(track => track.stop())
+                    setIsCameraLoading(false)
+                    setIsCameraOpen(false)
+                  }
+                }
+              },
+              (error: any) => {
+                console.error('Legacy camera error:', error)
+                setError('Camera access failed. Please try Safari or Chrome on iOS.')
+                setIsCameraLoading(false)
+                setIsCameraOpen(false)
+              }
+            )
+            return
           }
-        )
-        return
+        }
       }
 
-      if (!navigator.mediaDevices.getUserMedia) {
-        setError('Camera not supported on this device. Please try Safari or Chrome on iOS.')
-        return
-      }
-
-      // Try different camera configurations
-      let stream: MediaStream
-      const constraints = [
-        // Try back camera with high quality
+      // Try different camera configurations - iOS Safari optimized
+      let stream: MediaStream | undefined
+      const constraints = isIOS ? [
+        // iOS Safari: Start with basic back camera (most reliable)
+        { 
+          video: { 
+            facingMode: 'environment'
+          }
+        },
+        // iOS Safari: Basic front camera
+        { 
+          video: { 
+            facingMode: 'user'
+          }
+        },
+        // iOS Safari: Simple video constraint
+        { 
+          video: true 
+        },
+        // iOS Safari: Back camera with minimal constraints
+        { 
+          video: { 
+            facingMode: { ideal: 'environment' },
+            width: { max: 1920 },
+            height: { max: 1080 }
+          }
+        }
+      ] : [
+        // Non-iOS: Try back camera with high quality
         { 
           video: { 
             facingMode: 'environment',
@@ -194,14 +327,95 @@ export default function Home() {
         }
       }
 
-      if (!stream!) {
+      if (!stream) {
         throw lastError || new Error('No camera available')
       }
 
       if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        setIsCameraOpen(true)
-        setError('')
+        const video = videoRef.current
+        console.log('Setting stream on video element:', {
+          videoElement: video,
+          stream: stream,
+          streamActive: stream.active,
+          streamTracks: stream.getTracks().map(track => ({
+            kind: track.kind,
+            enabled: track.enabled,
+            readyState: track.readyState,
+            muted: track.muted
+          }))
+        })
+        
+        // Try multiple methods to set the video source
+        try {
+          video.srcObject = stream
+        } catch (e) {
+          console.warn('srcObject not supported, trying createObjectURL fallback')
+          // Fallback for older browsers
+          if ('mozSrcObject' in video) {
+            (video as any).mozSrcObject = stream
+          } else {
+            video.src = URL.createObjectURL(stream as any)
+          }
+        }
+        
+        // Add event listeners for debugging
+        video.addEventListener('loadstart', () => console.log('Video: loadstart'))
+        video.addEventListener('loadedmetadata', () => {
+          console.log('Video: loadedmetadata', {
+            videoWidth: video.videoWidth,
+            videoHeight: video.videoHeight,
+            duration: video.duration
+          })
+        })
+        video.addEventListener('loadeddata', () => console.log('Video: loadeddata'))
+        video.addEventListener('canplay', () => console.log('Video: canplay'))
+        video.addEventListener('canplaythrough', () => console.log('Video: canplaythrough'))
+        video.addEventListener('playing', () => console.log('Video: playing'))
+        video.addEventListener('pause', () => console.log('Video: pause'))
+        video.addEventListener('error', (e) => console.error('Video: error', e))
+        
+        // Explicitly play the video after setting the stream
+        try {
+          console.log('Attempting to play video...')
+          const playPromise = video.play()
+          await playPromise
+          
+          console.log('Video play successful:', {
+            paused: video.paused,
+            currentTime: video.currentTime,
+            videoWidth: video.videoWidth,
+            videoHeight: video.videoHeight,
+            readyState: video.readyState
+          })
+          
+          // Set camera as open immediately
+          setIsCameraOpen(true)
+          setError('')
+          setIsCameraLoading(false)
+          
+          // Check if video actually has dimensions after a short delay
+          setTimeout(() => {
+            if (video.videoWidth === 0 || video.videoHeight === 0) {
+              console.warn('Video has no dimensions, might not be displaying properly')
+              setError('Camera preview not showing. Try refreshing or using a different browser.')
+            } else {
+              console.log('Video dimensions confirmed:', {
+                videoWidth: video.videoWidth,
+                videoHeight: video.videoHeight
+              })
+            }
+          }, 2000)
+          
+          console.log('Camera stream started successfully')
+        } catch (playError) {
+          console.error('Video play error:', playError)
+          setError('Unable to start camera preview. Please try again.')
+          // Stop the stream if play fails
+          stream.getTracks().forEach(track => track.stop())
+          setIsCameraLoading(false)
+          setIsCameraOpen(false)
+          return
+        }
       }
     } catch (err) {
       console.error('Camera error:', err)
@@ -220,6 +434,12 @@ export default function Home() {
       } else {
         setError('Unable to access camera. Please check permissions and try again.')
       }
+    } finally {
+      setIsCameraLoading(false)
+      // If there is no active video stream, ensure camera UI is closed
+      if (!videoRef.current?.srcObject) {
+        setIsCameraOpen(false)
+      }
     }
   }
 
@@ -227,8 +447,18 @@ export default function Home() {
     if (videoRef.current?.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream
       stream.getTracks().forEach(track => track.stop())
+      videoRef.current.srcObject = null
       setIsCameraOpen(false)
     }
+  }
+
+  const refreshCamera = async () => {
+    console.log('Refreshing camera...')
+    stopCamera()
+    // Wait a moment before restarting
+    setTimeout(() => {
+      startCamera()
+    }, 500)
   }
 
   const capturePhoto = async () => {
@@ -403,36 +633,105 @@ export default function Home() {
                       variant={isCameraOpen ? "destructive" : "default"}
                       className="w-full"
                       size="lg"
+                      disabled={isCameraLoading}
                     >
-                      {isCameraOpen ? 'Stop Camera' : 'Open Camera'}
+                      {isCameraLoading ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Starting Camera...
+                        </>
+                      ) : (
+                        isCameraOpen ? 'Stop Camera' : 'Open Camera'
+                      )}
                     </Button>
                     
                     {isCameraOpen && (
-                      <div className="relative">
+                      <div className="relative bg-black rounded-lg overflow-hidden shadow-lg max-w-sm mx-auto">
                         <video
                           ref={videoRef}
                           autoPlay
                           playsInline
                           muted
-                          className="w-full max-w-sm mx-auto rounded-lg shadow-lg"
-                          onLoadedMetadata={() => {
-                            console.log('Camera ready')
+                          controls={false}
+                          className="w-full h-auto object-cover block"
+                          style={{ 
+                            minHeight: '240px',
+                            maxHeight: '400px',
+                            backgroundColor: '#000'
+                          }}
+                          onLoadedMetadata={(e) => {
+                            const video = e.target as HTMLVideoElement
+                            console.log('Camera ready - video metadata loaded:', {
+                              videoWidth: video.videoWidth,
+                              videoHeight: video.videoHeight,
+                              currentTime: video.currentTime,
+                              duration: video.duration,
+                              readyState: video.readyState,
+                              paused: video.paused
+                            })
+                          }}
+                          onCanPlay={(e) => {
+                            const video = e.target as HTMLVideoElement
+                            console.log('Camera ready - can play:', {
+                              videoWidth: video.videoWidth,
+                              videoHeight: video.videoHeight,
+                              readyState: video.readyState
+                            })
+                          }}
+                          onPlaying={(e) => {
+                            const video = e.target as HTMLVideoElement
+                            console.log('Video is now playing:', {
+                              videoWidth: video.videoWidth,
+                              videoHeight: video.videoHeight,
+                              currentTime: video.currentTime
+                            })
                           }}
                           onError={(e) => {
                             console.error('Video error:', e)
+                            const video = e.target as HTMLVideoElement
+                            console.error('Video error details:', {
+                              error: video.error,
+                              networkState: video.networkState,
+                              readyState: video.readyState
+                            })
                             setError('Camera error. Please try again.')
                             stopCamera()
                           }}
                         />
-                        <Button
-                          onClick={capturePhoto}
-                          size="lg"
-                          className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-white hover:bg-gray-50 text-slate-700 border shadow-lg"
-                        >
-                          <Camera className="w-5 h-5" />
-                        </Button>
-                        <div className="text-center mt-2">
-                          <p className="text-xs text-slate-500">Position the business card in the frame and tap the camera button</p>
+                        
+                        {/* Fallback message if video doesn't show */}
+                        <div className="absolute inset-0 flex items-center justify-center text-white text-sm bg-gray-800 bg-opacity-50" 
+                             style={{ 
+                               display: (videoRef.current?.videoWidth || 0) > 0 ? 'none' : 'flex'
+                             }}>
+                          <div className="text-center">
+                            <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
+                            <p>Loading camera preview...</p>
+                          </div>
+                        </div>
+                        
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                          <Button
+                            onClick={capturePhoto}
+                            size="lg"
+                            className="bg-white hover:bg-gray-50 text-slate-700 border shadow-lg rounded-full p-3"
+                          >
+                            <Camera className="w-6 h-6" />
+                          </Button>
+                        </div>
+                        <div className="absolute top-2 left-2 right-2 flex justify-between items-start">
+                          <Button
+                            onClick={refreshCamera}
+                            size="sm"
+                            variant="ghost"
+                            className="text-white bg-black bg-opacity-50 hover:bg-opacity-70 text-xs px-2 py-1 h-auto"
+                          >
+                            <RotateCcw className="w-3 h-3 mr-1" />
+                            Refresh
+                          </Button>
+                          <p className="text-xs text-white bg-black bg-opacity-50 rounded px-2 py-1 text-center flex-1 mx-2">
+                            Position the business card in the frame and tap the camera button
+                          </p>
                         </div>
                       </div>
                     )}
